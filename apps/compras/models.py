@@ -19,6 +19,7 @@ class Proveedor(models.Model):
     class Meta:
         db_table = 'com_proveedores'
         managed = True
+        managed = False
         ordering = ['nombre']
 
     def __str__(self):
@@ -61,6 +62,7 @@ class Compra(models.Model):
     class Meta:
         db_table = 'com_compras'
         managed = True
+        managed = False
         ordering = ['-fecha_compra']
 
     def __str__(self):
@@ -89,6 +91,7 @@ class CompraDetalle(models.Model):
     class Meta:
         db_table = 'com_compra_detalle'
         managed = True
+        managed = False
         ordering = ['id']
 
     def __str__(self):
@@ -132,6 +135,7 @@ class FacturaAbastecimiento(models.Model):
     class Meta:
         db_table = 'com_facturas_abastecimiento'
         managed = True
+        managed = False
         ordering = ['-fecha_emision']
 
     def __str__(self):
@@ -165,6 +169,7 @@ class DevolucionCompra(models.Model):
     class Meta:
         db_table = 'com_devoluciones'
         managed = True
+        managed = False
         ordering = ['-fecha_devolucion']
 
     def __str__(self):
@@ -189,8 +194,16 @@ class DevolucionCompraDetalle(models.Model):
 
     class Meta:
         db_table = 'com_devolucion_detalle'
+
         managed = True
         ordering = ['id']
 
     def __str__(self):
         return f"Detalle devolución #{self.devolucion_id}"
+
+        managed = False
+        ordering = ['id']
+
+    def __str__(self):
+        return f"Detalle devolución #{self.devolucion_id}"
+

@@ -1,3 +1,6 @@
+
+from django.shortcuts import render
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -181,4 +184,8 @@ class DevolucionCompraViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST)
         devolucion.estado = 'aprobada'
         devolucion.save()
+
         return Response({'ok': True, 'message': 'Devolución aprobada.'})
+
+        
+

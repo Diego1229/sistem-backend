@@ -2,7 +2,6 @@ from django.db import models
 from apps.configuracion.models import Sede, Impuesto, TipoMovimientoInventario
 from apps.usuarios.models import Usuario
 
-
 class Categoria(models.Model):
     """Categorías de productos. Un producto puede tener varias."""
     nombre = models.CharField(max_length=100, unique=True)
@@ -15,10 +14,12 @@ class Categoria(models.Model):
     class Meta:
         db_table = 'inv_categorias'
         managed = True
+        managed = False
         ordering = ['nombre']
 
     def __str__(self):
         return self.nombre
+
 
 
 class Producto(models.Model):
@@ -47,6 +48,7 @@ class Producto(models.Model):
     class Meta:
         db_table = 'inv_productos'
         managed = True
+        managed = False
         ordering = ['nombre']
 
     def __str__(self):
@@ -72,6 +74,7 @@ class ProductoCategoria(models.Model):
     class Meta:
         db_table = 'inv_producto_categoria'
         managed = True
+        managed = False
         unique_together = [['producto', 'categoria']]
 
     def __str__(self):
@@ -100,6 +103,7 @@ class Inventario(models.Model):
     class Meta:
         db_table = 'inv_stock'
         managed = True
+        managed = False
         unique_together = [['producto', 'sede']]
         ordering = ['producto__nombre']
 
@@ -153,6 +157,7 @@ class Movimiento(models.Model):
     class Meta:
         db_table = 'inv_movimientos'
         managed = True
+        managed = False
         ordering = ['-fecha_movimiento']
 
     def __str__(self):
@@ -182,6 +187,12 @@ class Lote(models.Model):
     class Meta:
         db_table = 'inv_lotes'
         managed = True
+        ordering = ['fecha_vencimiento']
+
+    def __str__(self):
+        return f"Lote {self.numero_lote} — {self.producto.nombre}"
+
+        managed = False
         ordering = ['fecha_vencimiento']
 
     def __str__(self):
