@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 from .models import Proveedor, Compra, CompraDetalle, FacturaAbastecimiento, DevolucionCompra, DevolucionCompraDetalle
 
@@ -116,3 +117,23 @@ class DevolucionCompraSerializer(serializers.ModelSerializer):
             'estado', 'estado_display', 'fecha_devolucion', 'detalles'
         ]
         read_only_fields = ['total_devuelto', 'estado', 'fecha_devolucion']
+
+
+class DevolucionCompraDetalleInputSerializer(serializers.Serializer):
+    """Línea de detalle recibida al crear una devolución a proveedor."""
+    compra_detalle_id = serializers.IntegerField()
+    cantidad_devuelta = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal('0.01')
+    )
+
+
+class CrearDevolucionCompraSerializer(serializers.Serializer):
+    """Serializer para registrar una devolución a proveedor con sus líneas de detalle."""
+    compra_id = serializers.IntegerField()
+    motivo = serializers.CharField()
+    detalles = DevolucionCompraDetalleInputSerializer(many=True)
+
+    def validate_detalles(self, value):
+        if not value:
+            raise serializers.ValidationError('La devolución debe tener al menos un producto.')
+        return value

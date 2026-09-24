@@ -79,16 +79,38 @@ def cerrar_caja(apertura_id, usuario, total_real, observacion='', desgloses=[]):
 
         diferencia = total_real - total_esperado
 
-        # Crear cierre
-        cierre = CierreCaja.objects.create(
-            apertura=apertura,
-            usuario_cierre=usuario,
-            total_ventas=total_ventas,
-            total_esperado=total_esperado,
-            total_real=total_real,
-            diferencia=diferencia,
-            observacion=observacion
-        )
+        # Crear cierre.
+        # NOTA: el documento de arquitectura indica que 'diferencia' es un
+        # campo GENERATED en MySQL (calculado por la base de datos). Si es
+        # así, MySQL rechaza cualquier INSERT que incluya un valor explícito
+        # para esa columna. Se intenta primero con el valor calculado en
+        # Python (caso columna normal); si la base de datos la rechaza por
+        # ser generada, se reintenta sin enviarla y se deja que MySQL la
+        # calcule, recargando el objeto después para leer el valor real.
+        # TODO: una vez confirmado el schema real, eliminar esta rama y
+        # dejar solo el camino correcto.
+        try:
+            cierre = CierreCaja.objects.create(
+                apertura=apertura,
+                usuario_cierre=usuario,
+                total_ventas=total_ventas,
+                total_esperado=total_esperado,
+                total_real=total_real,
+                diferencia=diferencia,
+                observacion=observacion
+            )
+        except Exception as e:
+            if 'generated column' not in str(e).lower():
+                raise
+            cierre = CierreCaja.objects.create(
+                apertura=apertura,
+                usuario_cierre=usuario,
+                total_ventas=total_ventas,
+                total_esperado=total_esperado,
+                total_real=total_real,
+                observacion=observacion
+            )
+            cierre.refresh_from_db()
 
         # Guardar desgloses por método de pago
         for desglose in desgloses:

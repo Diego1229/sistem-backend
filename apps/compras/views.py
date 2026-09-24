@@ -1,4 +1,3 @@
-
 from django.shortcuts import render
 
 from rest_framework import viewsets, status
@@ -12,9 +11,10 @@ from .models import Proveedor, Compra, FacturaAbastecimiento, DevolucionCompra
 from .serializers import (
     ProveedorSerializer, CompraListSerializer, CompraDetailSerializer,
     CrearCompraSerializer, RecibirCompraSerializer,
-    FacturaAbastecimientoSerializer, DevolucionCompraSerializer
+    FacturaAbastecimientoSerializer, DevolucionCompraSerializer,
+    CrearDevolucionCompraSerializer
 )
-from .services import crear_compra, recibir_compra
+from .services import crear_compra, recibir_compra, crear_devolucion_compra, aprobar_devolucion_compra
 from apps.usuarios.permissions import es_admin, get_sede_activa
 
 
@@ -165,27 +165,53 @@ class DevolucionCompraViewSet(viewsets.ModelViewSet):
         return DevolucionCompra.objects.select_related('compra', 'usuario')
 
     def create(self, request, *args, **kwargs):
+        """
+        POST /api/v1/compras/devoluciones/
+        Registra la devolución en estado 'pendiente' junto con sus líneas
+        de detalle. El stock solo se descuenta al aprobar (ver `aprobar`).
+        """
         if not es_admin(request.user):
             return Response({'ok': False, 'error': 'PERMISO_DENEGADO',
                 'message': 'Solo administradores pueden crear devoluciones.'},
                 status=status.HTTP_403_FORBIDDEN)
-        return super().create(request, *args, **kwargs)
+        serializer = CrearDevolucionCompraSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        try:
+            devolucion = crear_devolucion_compra(
+                compra_id=d['compra_id'],
+                usuario=request.user,
+                motivo=d['motivo'],
+                detalles=d['detalles']
+            )
+            return Response({'ok': True,
+                'data': DevolucionCompraSerializer(devolucion).data,
+                'message': 'Devolución registrada. Pendiente de aprobación.'
+            }, status=status.HTTP_201_CREATED)
+        except ValueError as e:
+            return Response({'ok': False, 'error': 'ERROR_DEVOLUCION',
+                'message': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'], url_path='aprobar')
     def aprobar(self, request, pk=None):
+        """
+        POST /api/v1/compras/devoluciones/{id}/aprobar/
+        Aprueba la devolución y descuenta el stock de cada producto devuelto.
+        """
         if not es_admin(request.user):
             return Response({'ok': False, 'error': 'PERMISO_DENEGADO',
                 'message': 'Solo administradores pueden aprobar devoluciones.'},
                 status=status.HTTP_403_FORBIDDEN)
-        devolucion = self.get_object()
-        if devolucion.estado != 'pendiente':
-            return Response({'ok': False, 'error': 'ESTADO_INVALIDO',
-                'message': 'Solo se pueden aprobar devoluciones pendientes.'},
-                status=status.HTTP_400_BAD_REQUEST)
-        devolucion.estado = 'aprobada'
-        devolucion.save()
-
-        return Response({'ok': True, 'message': 'Devolución aprobada.'})
-
-        
+        try:
+            devolucion = aprobar_devolucion_compra(
+                devolucion_id=pk,
+                usuario=request.user
+            )
+            return Response({'ok': True,
+                'data': DevolucionCompraSerializer(devolucion).data,
+                'message': 'Devolución aprobada. Stock actualizado.'
+            })
+        except ValueError as e:
+            return Response({'ok': False, 'error': 'ERROR_APROBACION',
+                'message': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 

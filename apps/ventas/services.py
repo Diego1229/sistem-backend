@@ -1,12 +1,15 @@
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
-from .models import Venta, VentaDetalle, Pago
+from .models import Venta, VentaDetalle, Pago, DevolucionVenta, DevolucionVentaDetalle
 from apps.inventario.models import Producto
 from apps.inventario.services import ajustar_stock
 from apps.configuracion.models import TipoMovimientoInventario, MetodoPago
 from apps.caja.models import MovimientoCaja, Apertura
 from apps.caja.services import get_apertura_activa
+from apps.usuarios.permissions import es_admin
+
+DESCUENTO_MAXIMO_VENDEDOR_PCT = Decimal('10')
 
 
 def get_consecutivo(sede_id, modulo):
@@ -32,8 +35,9 @@ def crear_venta(usuario, sede_id, items, pagos, descuento=0,
 
         # 1 — Verificar caja abierta
         apertura = get_apertura_activa(sede_id=sede_id, usuario=usuario)
-        if not apertura:
-            # Admin puede vender sin restricción de usuario
+        if not apertura and es_admin(usuario, sede_id):
+            # Solo el admin puede vender usando cualquier apertura activa de la sede.
+            # Un vendedor SIEMPRE debe usar su propio turno abierto.
             apertura = get_apertura_activa(sede_id=sede_id)
         if not apertura:
             raise ValueError('No hay caja abierta en esta sede. Abra un turno antes de vender.')
@@ -78,7 +82,18 @@ def crear_venta(usuario, sede_id, items, pagos, descuento=0,
                 'subtotal': subtotal
             })
 
-        total_con_descuento = total - Decimal(str(descuento))
+        # 3.5 — Validar límite de descuento (10% sin aprobación, más solo admin)
+        descuento_dec = Decimal(str(descuento))
+        if descuento_dec > 0 and total > 0:
+            porcentaje_descuento = (descuento_dec / total) * 100
+            if porcentaje_descuento > DESCUENTO_MAXIMO_VENDEDOR_PCT and not es_admin(usuario, sede_id):
+                raise ValueError(
+                    f'El descuento (${descuento_dec}, {porcentaje_descuento:.1f}%) supera el '
+                    f'{DESCUENTO_MAXIMO_VENDEDOR_PCT}% permitido para vendedores. '
+                    f'Se requiere aprobación de un administrador.'
+                )
+
+        total_con_descuento = total - descuento_dec
 
         # 4 — Validar que el pago cubra el total
         total_pagado = sum(Decimal(str(p['monto'])) for p in pagos)
@@ -183,3 +198,94 @@ def anular_venta(venta_id, usuario, motivo=''):
         Venta.objects.filter(pk=venta.pk).update(estado='anulada')
         venta.refresh_from_db()
         return venta
+
+
+def crear_devolucion_venta(venta_id, usuario, motivo, detalles):
+    """
+    Crea una devolución parcial de cliente en estado 'pendiente' con sus
+    líneas de detalle. No mueve stock todavía — eso ocurre al aprobar
+    (ver aprobar_devolucion_venta), igual que en anular_venta().
+    """
+    with transaction.atomic():
+        venta = Venta.objects.select_for_update().get(pk=venta_id)
+
+        if venta.estado == 'anulada':
+            raise ValueError('No se puede registrar una devolución sobre una venta anulada.')
+
+        devolucion = DevolucionVenta.objects.create(
+            venta=venta,
+            usuario=usuario,
+            motivo=motivo,
+            estado='pendiente',
+            total_devuelto=0
+        )
+
+        total = Decimal('0.00')
+        for item in detalles:
+            try:
+                venta_detalle = VentaDetalle.objects.get(
+                    pk=item['venta_detalle_id'], venta=venta
+                )
+            except VentaDetalle.DoesNotExist:
+                raise ValueError('Uno de los productos no pertenece a esta venta.')
+
+            cantidad_devuelta = item['cantidad_devuelta']
+            if cantidad_devuelta > venta_detalle.cantidad:
+                raise ValueError(
+                    f'No se puede devolver más de lo vendido para '
+                    f'"{venta_detalle.producto.nombre}" (vendido: {venta_detalle.cantidad}).'
+                )
+
+            DevolucionVentaDetalle.objects.create(
+                devolucion=devolucion,
+                venta_detalle=venta_detalle,
+                cantidad_devuelta=cantidad_devuelta
+            )
+            total += cantidad_devuelta * venta_detalle.precio_unitario
+
+        DevolucionVenta.objects.filter(pk=devolucion.pk).update(total_devuelto=total)
+        devolucion.refresh_from_db()
+        return devolucion
+
+
+def aprobar_devolucion_venta(devolucion_id, usuario):
+    """
+    Aprueba una devolución de cliente: devuelve el stock de cada producto
+    devuelto usando ajustar_stock(), igual que hace anular_venta().
+    """
+    with transaction.atomic():
+        devolucion = DevolucionVenta.objects.select_for_update().get(pk=devolucion_id)
+
+        if devolucion.estado != 'pendiente':
+            raise ValueError('Solo se pueden aprobar devoluciones pendientes.')
+
+        tipo_entrada = TipoMovimientoInventario.objects.filter(
+            nombre='Devolución cliente', tipo='entrada'
+        ).first()
+        if not tipo_entrada:
+            raise ValueError(
+                'No existe el tipo de movimiento "Devolución cliente" en la configuración.'
+            )
+
+        detalles = devolucion.detalles.select_related('venta_detalle__producto')
+        if not detalles.exists():
+            raise ValueError('Esta devolución no tiene productos registrados.')
+
+        for detalle in detalles:
+            producto = detalle.venta_detalle.producto
+            if producto.controla_stock:
+                ajustar_stock(
+                    producto_id=producto.id,
+                    sede_id=devolucion.venta.sede_id,
+                    cantidad=detalle.cantidad_devuelta,
+                    tipo_movimiento_id=tipo_entrada.id,
+                    usuario=usuario,
+                    observacion=(
+                        f'Devolución de cliente #{devolucion.id} — '
+                        f'Venta {devolucion.venta.numero_venta}'
+                    )
+                )
+
+        DevolucionVenta.objects.filter(pk=devolucion.pk).update(estado='aprobada')
+        devolucion.refresh_from_db()
+        return devolucion

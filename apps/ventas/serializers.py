@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 from .models import Cliente, Venta, VentaDetalle, Pago, FacturaVenta, DevolucionVenta, DevolucionVentaDetalle
 
@@ -126,6 +127,26 @@ class DevolucionVentaSerializer(serializers.ModelSerializer):
             'estado', 'estado_display', 'fecha_devolucion', 'detalles'
         ]
         read_only_fields = ['total_devuelto', 'estado', 'fecha_devolucion']
+
+
+class DevolucionVentaDetalleInputSerializer(serializers.Serializer):
+    """Línea de detalle recibida al crear una devolución de cliente."""
+    venta_detalle_id = serializers.IntegerField()
+    cantidad_devuelta = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal('0.01')
+    )
+
+
+class CrearDevolucionVentaSerializer(serializers.Serializer):
+    """Serializer para registrar una devolución de cliente con sus líneas de detalle."""
+    venta_id = serializers.IntegerField()
+    motivo = serializers.CharField()
+    detalles = DevolucionVentaDetalleInputSerializer(many=True)
+
+    def validate_detalles(self, value):
+        if not value:
+            raise serializers.ValidationError('La devolución debe tener al menos un producto.')
+        return value
 
 
 class AnularVentaSerializer(serializers.Serializer):
